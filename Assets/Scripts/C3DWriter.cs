@@ -5,9 +5,12 @@ using UnityEngine;
 
 public class C3DWriter
 {
-    [DllImport("ezc3d_wrapper")] private static extern void c3d_init(float frameRate);
-    [DllImport("ezc3d_wrapper")] private static extern void c3d_add_label(string label);
-    [DllImport("ezc3d_wrapper")] private static extern void c3d_set_params();
+    // El wrapper ahora usa c3d_add_point_label y c3d_add_analog_label
+    // en lugar de c3d_add_label y c3d_set_params
+    [DllImport("ezc3d_wrapper")] private static extern void c3d_init(float frameRate, int nAnalogs);
+    [DllImport("ezc3d_wrapper")] private static extern void c3d_add_point_label(string label);
+    [DllImport("ezc3d_wrapper")] private static extern void c3d_add_analog_label(string label);
+    [DllImport("ezc3d_wrapper")] private static extern void c3d_set_rates();
     [DllImport("ezc3d_wrapper")] private static extern int c3d_add_frame(float[] positions, int nPoints, float[] analogs, int nAnalogs);
     [DllImport("ezc3d_wrapper")] private static extern void c3d_write(string path);
     [DllImport("ezc3d_wrapper")] private static extern void c3d_destroy();
@@ -52,6 +55,15 @@ public class C3DWriter
         "LittleMetacarpal","LittleProximal","LittleIntermediate","LittleDistal","LittleTip"
     };
 
+    // Labels de los canales analogicos — igual que Miguel Angel
+    private static readonly string[] BASE_ANALOG_LABELS = new string[]
+    {
+        "timestamp",
+        "hmd_qx", "hmd_qy", "hmd_qz", "hmd_qw",
+        "left_qx", "left_qy", "left_qz", "left_qw",
+        "right_qx", "right_qy", "right_qz", "right_qw"
+    };
+
     private List<FrameData> _frames = new List<FrameData>();
     private float _frameRate = 72f;
     private bool _hasHandTracking = false;
@@ -82,25 +94,48 @@ public class C3DWriter
             return;
         }
 
-        var labels = new List<string>(BASE_LABELS);
+        var pointLabels = new List<string>(BASE_LABELS);
         if (_hasHandTracking)
         {
-            foreach (var j in JOINT_NAMES) labels.Add("L_" + j);
-            foreach (var j in JOINT_NAMES) labels.Add("R_" + j);
+            foreach (var j in JOINT_NAMES) pointLabels.Add("L_" + j);
+            foreach (var j in JOINT_NAMES) pointLabels.Add("R_" + j);
         }
 
-        int nPoints = labels.Count;
-        int nAnalogs = 0;
+        var analogLabels = new List<string>(BASE_ANALOG_LABELS);
+        if (_hasHandTracking)
+        {
+            for (int i = 0; i < 26; i++)
+            {
+                analogLabels.Add($"L_{JOINT_NAMES[i]}_qx");
+                analogLabels.Add($"L_{JOINT_NAMES[i]}_qy");
+                analogLabels.Add($"L_{JOINT_NAMES[i]}_qz");
+                analogLabels.Add($"L_{JOINT_NAMES[i]}_qw");
+            }
+            for (int i = 0; i < 26; i++)
+            {
+                analogLabels.Add($"R_{JOINT_NAMES[i]}_qx");
+                analogLabels.Add($"R_{JOINT_NAMES[i]}_qy");
+                analogLabels.Add($"R_{JOINT_NAMES[i]}_qz");
+                analogLabels.Add($"R_{JOINT_NAMES[i]}_qw");
+            }
+        }
+
+        int nPoints = pointLabels.Count;
+        int nAnalogs = analogLabels.Count;
 
         // Inicializar ezc3d via DLL
-        c3d_init(_frameRate);
+        c3d_init(_frameRate, nAnalogs);
 
-        // Añadir labels
-        foreach (var label in labels)
-            c3d_add_label(label);
+        // Añadir labels de puntos via c3d.point()
+        foreach (var label in pointLabels)
+            c3d_add_point_label(label);
 
-        // Configurar parametros antes de añadir frames
-        c3d_set_params();
+        // Añadir labels de canales analogicos via c3d.analog()
+        foreach (var label in analogLabels)
+            c3d_add_analog_label(label);
+
+        // Configurar rates
+        c3d_set_rates();
 
         // Añadir frames uno a uno
         int frameErrors = 0;
@@ -115,7 +150,7 @@ public class C3DWriter
                 positions[i * 3 + 2] = points[i].z * 1000f;
             }
 
-            float[] analogs = nAnalogs > 0 ? BuildAnalogData(frame, nAnalogs) : new float[0];
+            float[] analogs = BuildAnalogData(frame, nAnalogs);
             int result = c3d_add_frame(positions, nPoints, analogs, nAnalogs);
             if (result != 0)
             {
