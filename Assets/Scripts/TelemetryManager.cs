@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using UnityEngine;
 
@@ -38,7 +39,7 @@ public class TelemetryManager
         _sessionId = sessionId;
         _deviceInfo = deviceInfo;
 
-        // Inicializar el escritor C3D con los parametros de configuracion
+        // Inicializar el escritor C3D con ezc3d via DLL
         _c3dWriter = new C3DWriter();
         _c3dWriter.Initialize(sessionId, _config.FrameRate, _config.HandTracking);
 
@@ -54,13 +55,12 @@ public class TelemetryManager
     {
         if (!_initialized) return;
 
-        // El primer frame marca el tiempo cero de la sesion
         if (_t0 < 0) _t0 = frame.timestamp;
         frame.timestamp -= _t0;
 
         _buffer.Add(frame);
 
-        // Convertir el frame al formato que entiende el C3DWriter
+        // Convertir el frame al formato del C3DWriter y añadirlo
         var c3dFrame = new C3DWriter.FrameData
         {
             timestamp = (float)frame.timestamp,
@@ -121,14 +121,14 @@ public class TelemetryManager
             _mono.StartCoroutine(_jsonUploader.UploadJSON(SerializeChunk(_uploadChunk)));
         }
 
-        // Escribir el archivo C3D final
+        // Escribir el archivo C3D usando ezc3d via DLL
         _c3dWriter.Write(outputPath);
+
         _initialized = false;
         Debug.Log("TelemetryManager: sesion cerrada, C3D guardado en " + outputPath);
     }
 
     // Serializa un chunk de frames a JSON para mandarlo a Supabase
-    // El formato es el mismo que usa Miguel Angel en su implementacion
     private string SerializeChunk(List<VRFrameData> frames)
     {
         var sb = new StringBuilder();
@@ -143,25 +143,21 @@ public class TelemetryManager
             sb.Append("{");
             sb.Append($"\"timestamp\":{f.timestamp:F5},");
 
-            // HMD
             sb.Append($"\"head_pose\":{{");
             sb.Append($"\"position\":[{f.hmdPos[0]:F5},{f.hmdPos[1]:F5},{f.hmdPos[2]:F5}],");
             sb.Append($"\"orientation\":[{f.hmdRot[0]:F5},{f.hmdRot[1]:F5},{f.hmdRot[2]:F5},{f.hmdRot[3]:F5}]");
             sb.Append("},");
 
-            // Mano izquierda
             sb.Append($"\"left_hand\":{{");
             sb.Append($"\"position\":[{f.leftPos[0]:F5},{f.leftPos[1]:F5},{f.leftPos[2]:F5}],");
             sb.Append($"\"orientation\":[{f.leftRot[0]:F5},{f.leftRot[1]:F5},{f.leftRot[2]:F5},{f.leftRot[3]:F5}]");
             sb.Append("},");
 
-            // Mano derecha
             sb.Append($"\"right_hand\":{{");
             sb.Append($"\"position\":[{f.rightPos[0]:F5},{f.rightPos[1]:F5},{f.rightPos[2]:F5}],");
             sb.Append($"\"orientation\":[{f.rightRot[0]:F5},{f.rightRot[1]:F5},{f.rightRot[2]:F5},{f.rightRot[3]:F5}]");
             sb.Append("}");
 
-            // Joints de las manos si hay hand tracking
             if (f.leftJoints != null && f.leftJoints.Length > 0)
             {
                 sb.Append(",\"hands\":{\"left\":{\"joint_count\":");
